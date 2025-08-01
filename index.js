@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('fs');
-const bencode = require('bencode');
+import bencode from  'bencode'
 const tracker = require('./tracker.js');
 const torrentParser = require('./torrent-parser.js');
 
