@@ -4,7 +4,17 @@ const dgram = require('dgram')
 const { parse } = require('path')
 const Buffer = require('buffer').Buffer
 const urlParse = require('url').parse
+const crypto = require('crypto')
 
+function buildConnReq() {
+    const buf = Buffer.alloc(16)
+
+    buf.writeUInt32BE(0x417, 0)
+    buf.writeUInt32BE(0x27101980, 4)
+    buf.writeUInt32BE(0, 8)
+
+    crypto.randomBytes(4).copy(buf, 12)
+}
 function udpSend(socket, message, url) {
     const url = urlParse(rawUrl)
     socket.send(message, 0, message.length, url.port, url.host, callback)
@@ -48,3 +58,4 @@ module.exports.getPeers = (torrent, callback) => {
         }
     })
 }
+
