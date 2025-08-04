@@ -62,7 +62,7 @@ function haveHandler(payload, socket, requested) {
   // ...
   const pieceIndex = payload.readUInt32BE(0);
   if (!requested[pieceIndex]) {
-    socket.write(message.buildRequest(...));
+    socket.write(message.buildRequest());
   }
   requested[pieceIndex] = true;
 }
