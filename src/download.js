@@ -2,8 +2,9 @@
 
 import net from 'net'
 import Buffer from 'buffer'
-
 import getPeers from './tracker'
+
+const message = import('./message.js');
 
 const torrent = () => {
     getPeers(torrent, peers => {
@@ -16,13 +17,10 @@ function download(peer) {
 
     socket.on('error', console.log)
     socket.connect(peer.port, peer.ip, () => {
-        socket.write(Buffer.from('Hello, peer!'))
+        socket.write(message.buildHandshake(torrent))
     })
 
-    socket.on('data', data => {
-        console.log(`Received data from peer ${peer.ip}:${peer.port}:`, data)
-        
-    })
+    onWholeMsg(socket, msg => msgHandler(msg, socket))
 }
 
 function onWholeMsg(socket, callback) {
@@ -40,4 +38,15 @@ function onWholeMsg(socket, callback) {
             handshake = false
         }
     })
+}
+
+function isHandshake(msg) {
+    return msg.length === msg.readUInt8(0) + 49 &&
+    msg.toString('utf8', 1, 20) === 'BitTorrent protocol'
+}
+
+function msgHandler(msg, socket) {
+    if (isHandshake(msg)) {
+        socket.write(message.buildInterested())
+    }
 }
