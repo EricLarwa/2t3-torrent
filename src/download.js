@@ -58,3 +58,11 @@ function msgHandler(msg, socket) {
         else if(m.id === 7) {pieceHandler(m, socket)}
     }
 }
+function haveHandler(payload, socket, requested) {
+  // ...
+  const pieceIndex = payload.readUInt32BE(0);
+  if (!requested[pieceIndex]) {
+    socket.write(message.buildRequest(...));
+  }
+  requested[pieceIndex] = true;
+}
