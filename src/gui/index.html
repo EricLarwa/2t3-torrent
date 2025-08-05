@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>BitTorrent Client</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🌊 BitTorrent Client</h1>
+        </header>
+        
+        <main>
+            <div class="upload-section">
+                <button id="selectTorrent" class="btn btn-primary">
+                    📁 Select Torrent File
+                </button>
+                <span id="selectedFile" class="file-info"></span>
+            </div>
+            
+            <div class="download-section">
+                <button id="selectLocation" class="btn btn-secondary" disabled>
+                    📂 Choose Download Location
+                </button>
+                <span id="selectedLocation" class="file-info"></span>
+            </div>
+            
+            <div class="action-section">
+                <button id="startDownload" class="btn btn-success" disabled>
+                    ⬇️ Start Download
+                </button>
+            </div>
+            
+            <div class="progress-section" id="progressSection" style="display: none;">
+                <div class="progress-info">
+                    <h3>Download Progress</h3>
+                    <div class="progress-bar">
+                        <div id="progressFill" class="progress-fill"></div>
+                    </div>
+                    <div class="progress-details">
+                        <span id="progressText">0%</span>
+                        <span id="speedText">0 KB/s</span>
+                        <span id="peersText">0 peers</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="log-section">
+                <h3>Activity Log</h3>
+                <div id="logContainer" class="log-container"></div>
+            </div>
+        </main>
+    </div>
+    
+    <script src="renderer.js"></script>
+</body>
+</html>

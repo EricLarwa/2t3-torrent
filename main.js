@@ -12,7 +12,7 @@ function createWindow() {
             contextIsolation: true,
             preload: path.join(__dirname, 'preload.js')
         },
-        icon: path.join(__dirname, 'assets/icon.png') // Optional
+        icon: path.join(__dirname, 'assets/icon.png') 
     })
 
     mainWindow.loadFile('src/gui/index.html')
@@ -62,8 +62,8 @@ ipcMain.handle('select-download-location', async () => {
 ipcMain.handle('start-download', async (event, torrentPath, downloadPath) => {
     try {
         // Import your modules
-        const torrentParser = await import('./src/torrent-parser.js')
-        const download = await import('./src/download.js')
+        const torrentParser = await import('./src/BitProcess/torrent-parser.js')
+        const download = await import('./src/BitProcess/download.js')
         
         const torrent = torrentParser.default.open(torrentPath)
         

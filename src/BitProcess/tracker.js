@@ -6,7 +6,7 @@ import crypto from 'crypto'
 import util from './util.js'
 
 // Fix: Use await for dynamic import
-const torrentParser = await import('./torrent-parser.js')
+const torrentParser = await import('./BitProcess/torrent-parser.js')
 
 function buildConnReq() {
     const buf = Buffer.alloc(16)
