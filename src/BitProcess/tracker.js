@@ -5,16 +5,14 @@ import { Buffer } from 'buffer'
 import crypto from 'crypto'
 import util from './util.js'
 
-// Fix: Use await for dynamic import
 const torrentParser = await import('./torrent-parser.js')
 
 function buildConnReq() {
     const buf = Buffer.alloc(16)
-
-    // BitTorrent UDP tracker protocol magic constants
-    buf.writeUInt32BE(0x41727101, 0)
-    buf.writeUInt32BE(0x980, 4)
-    buf.writeUInt32BE(0, 8)
+    // Fixed magic constants for BitTorrent UDP tracker protocol
+    buf.writeUInt32BE(0x417, 0)
+    buf.writeUInt32BE(0x27101980, 4)
+    buf.writeUInt32BE(0, 8) // action: connect
     crypto.randomBytes(4).copy(buf, 12)
     return buf
 }
@@ -36,7 +34,7 @@ function respType(resp) {
 }
 
 function buildAnnounceReq(connId, torrent, port = 6881) {
-    const buf = Buffer.allocUnsafe(98)
+    const buf = Buffer.alloc(98)
 
     // Connection ID (8 bytes)
     connId.copy(buf, 0)
@@ -62,8 +60,8 @@ function buildAnnounceReq(connId, torrent, port = 6881) {
     // Uploaded (8 bytes)
     Buffer.alloc(8).copy(buf, 72)
     
-    // Event (4 bytes)
-    buf.writeUInt32BE(0, 80)
+    // Event (4 bytes) - 0: none, 1: completed, 2: started, 3: stopped
+    buf.writeUInt32BE(2, 80) // started event
     
     // IP address (4 bytes) - 0 means use sender's IP
     buf.writeUInt32BE(0, 84)
@@ -136,7 +134,7 @@ function getPeers(torrent, callback) {
     timeout = setTimeout(() => {
         console.log('Tracker request timeout')
         socket.close()
-        callback(new Error('Tracker request timeout'))
+        callback(new Error('Tracker request timeout'), null)
     }, TIMEOUT_MS)
     
     // Handle socket errors
@@ -144,7 +142,7 @@ function getPeers(torrent, callback) {
         console.log('Socket error:', err)
         clearTimeout(timeout)
         socket.close()
-        callback(err)
+        callback(err, null) 
     })
     
     // Convert URL properly
@@ -162,6 +160,7 @@ function getPeers(torrent, callback) {
     // Handle incoming messages
     socket.on('message', (response, rinfo) => {
         console.log('Received response from:', rinfo)
+        console.log('Response length:', response.length)
         console.log('Response type:', respType(response))
         
         try {
@@ -175,7 +174,7 @@ function getPeers(torrent, callback) {
                     if (err) {
                         clearTimeout(timeout)
                         socket.close()
-                        callback(err)
+                        callback(err, null) // Fix: Pass error as first param
                     }
                 })
             } else if (respType(response) === 'announce') {
@@ -183,13 +182,21 @@ function getPeers(torrent, callback) {
                 clearTimeout(timeout)
                 const announceResp = parseAnnounceResp(response)
                 socket.close()
-                callback(null, announceResp.peers)
+                
+                // Validate peers array
+                if (!announceResp.peers || !Array.isArray(announceResp.peers)) {
+                    callback(new Error('Invalid peers data received'), null)
+                    return
+                }
+                
+                console.log(`Found ${announceResp.peers.length} peers`)
+                callback(null, announceResp.peers) // Fix: Pass null as error, peers as data
             }
         } catch (err) {
             console.log('Error processing response:', err)
             clearTimeout(timeout)
             socket.close()
-            callback(err)
+            callback(err, null) // Fix: Pass error as first param
         }
     })
     
@@ -199,7 +206,7 @@ function getPeers(torrent, callback) {
         if (err) {
             clearTimeout(timeout)
             socket.close()
-            return callback(err)
+            return callback(err, null) // Fix: Pass error as first param
         }
     })
 }
