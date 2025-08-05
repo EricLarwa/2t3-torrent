@@ -5,14 +5,16 @@ import Buffer from 'buffer'
 import getPeers from './tracker'
 
 const message = import('./message.js');
+const Pieces = import('./pieces.js');
 
 const torrent = () => {
     getPeers(torrent, peers => {
-        peers.forEach(download)
+        const pieces = new Pieces(torrent.info.pieces.length / 20)
+        peers.forEach(peer => download(peer, pieces))
     })
 }
 
-function download(peer) {
+function download(peer, torrent, pieces) {
     const socket = net.Socket()
 
     socket.on('error', console.log)
@@ -20,7 +22,8 @@ function download(peer) {
         socket.write(message.buildHandshake(torrent))
     })
 
-    onWholeMsg(socket, msg => msgHandler(msg, socket))
+    const queue = {choked: true, queue: []}
+    onWholeMsg(socket, msg => msgHandler(msg, socket, pieces, queue))
 }
 
 function onWholeMsg(socket, callback) {
@@ -45,17 +48,17 @@ function isHandshake(msg) {
     msg.toString('utf8', 1, 20) === 'BitTorrent protocol'
 }
 
-function msgHandler(msg, socket) {
+function msgHandler(msg, socket, pieces, queue) {
     if (isHandshake(msg)) {
         socket.write(message.buildInterested())
     } else {
         const m = message.parse(msg)
 
-        if(m.id === 0) {chokeHandler()}
-        else if(m.id === 1) {unchokeHandler()}
-        else if(m.id === 4) {haveHandler(m)}
-        else if(m.id === 5) {bitfieldHandler(m)}
-        else if(m.id === 7) {pieceHandler(m, socket)}
+        if(m.id === 0) {chokeHandler(socket)}
+        else if(m.id === 1) {unchokeHandler(socket, pieces, queue)}
+        else if(m.id === 4) {haveHandler(m.payload)}
+        else if(m.id === 5) {bitfieldHandler(m.payload)}
+        else if(m.id === 7) {pieceHandler(m.payload)}
     }
 }
 function haveHandler(payload, socket, requested) {
@@ -65,4 +68,33 @@ function haveHandler(payload, socket, requested) {
     socket.write(message.buildRequest());
   }
   requested[pieceIndex] = true;
+}
+
+function chokeHandler(socket) {
+    socket.end()
+}
+
+function unchokeHandler(socket, pieces, queue) {
+    queue.choked = false
+    requestPiece(socket, pieces, queue)
+}
+
+
+function requestPiece(socket, pieces, queue) {
+    if(queue.choked) {
+        return null
+    }
+
+    while (queue.queue.length) {
+        const pieceIndex = queue.shift()
+        if(pieces.needed(pieceIndex)) {
+            pieces.addRequested(pieceIndex)
+            socket.write(message.buildRequest({
+                index: pieceIndex,
+                begin: 0,
+                length: 16384
+            }))
+            return pieceIndex
+        }
+    }
 }
