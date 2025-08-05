@@ -62,13 +62,13 @@ function msgHandler(msg, socket, pieces, queue) {
         else if(m.id === 7) {pieceHandler(m.payload)}
     }
 }
-function haveHandler(payload, socket, requested) {
-  // ...
-  const pieceIndex = payload.readUInt32BE(0);
-  if (!requested[pieceIndex]) {
-    socket.write(message.buildRequest());
-  }
-  requested[pieceIndex] = true;
+function haveHandler(payload, socket, requested, queue) {
+    const pieceIndex = payload.readUInt32BE(0);
+    const queueEmpty = queue.length === 0;
+    queue.queue(pieceIndex);
+    if (queueEmpty) { requestPiece(socket, pieces, queue) }
+
+    requested[pieceIndex] = true;
 }
 
 function chokeHandler(socket) {
