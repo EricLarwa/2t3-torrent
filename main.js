@@ -65,7 +65,18 @@ ipcMain.handle('select-download-location', async () => {
 // Handle torrent download
 ipcMain.handle('start-download', async (event, torrentPath, downloadPath) => {
     try {
-        // Import your ES modules
+        // Validate inputs
+        if (!torrentPath) {
+            return { success: false, error: 'No torrent file selected' }
+        }
+        
+        if (!downloadPath) {
+            return { success: false, error: 'No download location selected' }
+        }
+        
+        console.log('Starting download:', { torrentPath, downloadPath })
+        
+        // Import your modules
         const torrentParser = await import('./src/BitProcess/torrent-parser.js')
         const download = await import('./src/BitProcess/download.js')
         
@@ -73,12 +84,14 @@ ipcMain.handle('start-download', async (event, torrentPath, downloadPath) => {
         
         // Start download and send progress updates
         download.default(torrent, downloadPath, (progress) => {
-            mainWindow.webContents.send('download-progress', progress)
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('download-progress', progress)
+            }
         })
         
-        return { success: true }
+        return { success: true, message: 'Download started successfully' }
     } catch (error) {
-        console.error('Download error:', error)
+        console.error('Download start error:', error)
         return { success: false, error: error.message }
     }
 })

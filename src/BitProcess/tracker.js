@@ -7,75 +7,176 @@ import util from './util.js'
 
 const torrentParser = await import('./torrent-parser.js')
 
+// Add debugging flag
+const DEBUG = true
+
+function log(message, ...args) {
+    if (DEBUG) {
+        console.log(`[TRACKER] ${message}`, ...args)
+    }
+}
+
 function buildConnReq() {
     const buf = Buffer.alloc(16)
-    // Fixed magic constants for BitTorrent UDP tracker protocol
-    buf.writeUInt32BE(0x417, 0)
-    buf.writeUInt32BE(0x27101980, 4)
-    buf.writeUInt32BE(0, 8) // action: connect
-    crypto.randomBytes(4).copy(buf, 12)
+    // BitTorrent UDP tracker protocol magic constants
+    buf.writeUInt32BE(0x41727101, 0)  // Magic constant part 1
+    buf.writeUInt32BE(0x980, 4)       // Magic constant part 2
+    buf.writeUInt32BE(0, 8)           // Action: connect (0)
+    const transactionId = crypto.randomBytes(4)
+    transactionId.copy(buf, 12)       // Transaction ID
+    
+    log('Built connection request:', {
+        magic1: buf.readUInt32BE(0).toString(16),
+        magic2: buf.readUInt32BE(4).toString(16),
+        action: buf.readUInt32BE(8),
+        transactionId: buf.readUInt32BE(12)
+    })
+    
     return buf
 }
 
-// Parse the connection response
 function parseConnResp(resp) {
-    return {
+    if (resp.length < 16) {
+        throw new Error(`Connection response too short: ${resp.length} bytes`)
+    }
+    
+    const result = {
         action: resp.readUInt32BE(0),
         transactionId: resp.readUInt32BE(4),
         connectionId: resp.slice(8)
     }
+    
+    log('Parsed connection response:', {
+        action: result.action,
+        transactionId: result.transactionId,
+        connectionId: result.connectionId.toString('hex')
+    })
+    
+    return result
 }
 
 function respType(resp) {
+    if (!resp || resp.length < 4) {
+        log('Invalid response: too short or null')
+        return 'error'
+    }
+    
     const action = resp.readUInt32BE(0)
+    log('Response action:', action)
+    
     if (action === 0) return 'connect'
     if (action === 1) return 'announce'
-    return 'error'
+    if (action === 3) return 'error'
+    
+    log('Unknown action type:', action)
+    return 'unknown'
 }
 
 function buildAnnounceReq(connId, torrent, port = 6881) {
+    if (!connId || connId.length !== 8) {
+        throw new Error('Invalid connection ID')
+    }
+    
     const buf = Buffer.alloc(98)
+    let offset = 0
 
     // Connection ID (8 bytes)
-    connId.copy(buf, 0)
+    connId.copy(buf, offset)
+    offset += 8
     
     // Action: announce (1)
-    buf.writeUInt32BE(1, 8)
+    buf.writeUInt32BE(1, offset)
+    offset += 4
 
     // Transaction ID (4 bytes)
-    crypto.randomBytes(4).copy(buf, 12)
+    const transactionId = crypto.randomBytes(4)
+    transactionId.copy(buf, offset)
+    offset += 4
     
     // Info hash (20 bytes)
-    torrentParser.default.infoHash(torrent).copy(buf, 16)
+    const infoHash = torrentParser.default.infoHash(torrent)
+    infoHash.copy(buf, offset)
+    offset += 20
     
     // Peer ID (20 bytes)
-    util.genId().copy(buf, 36)
+    const peerId = util.genId()
+    peerId.copy(buf, offset)
+    offset += 20
     
     // Downloaded (8 bytes)
-    Buffer.alloc(8).copy(buf, 56)
+    buf.writeBigUInt64BE(0n, offset)
+    offset += 8
     
-    // Left (8 bytes)
-    torrentParser.default.size(torrent).copy(buf, 64)
+    // Left (8 bytes) - total size of torrent
+    const totalSize = torrentParser.default.size(torrent)
+    totalSize.copy(buf, offset)
+    offset += 8
     
     // Uploaded (8 bytes)
-    Buffer.alloc(8).copy(buf, 72)
+    buf.writeBigUInt64BE(0n, offset)
+    offset += 8
     
     // Event (4 bytes) - 0: none, 1: completed, 2: started, 3: stopped
-    buf.writeUInt32BE(2, 80) // started event
+    buf.writeUInt32BE(2, offset) // started event
+    offset += 4
     
     // IP address (4 bytes) - 0 means use sender's IP
-    buf.writeUInt32BE(0, 84)
+    buf.writeUInt32BE(0, offset)
+    offset += 4
 
     // Key (4 bytes)
-    crypto.randomBytes(4).copy(buf, 88)
+    crypto.randomBytes(4).copy(buf, offset)
+    offset += 4
     
-    // Num want (4 bytes)
-    buf.writeInt32BE(-1, 92)
+    // Num want (4 bytes) - number of peers we want
+    buf.writeInt32BE(-1, offset) // -1 means default
+    offset += 4
     
     // Port (2 bytes)
-    buf.writeUInt16BE(port, 96)
+    buf.writeUInt16BE(port, offset)
+
+    log('Built announce request:', {
+        connectionId: connId.toString('hex'),
+        action: 1,
+        transactionId: transactionId.readUInt32BE(0),
+        infoHash: infoHash.toString('hex'),
+        peerId: peerId.toString('hex'),
+        event: 'started',
+        port: port,
+        totalLength: offset + 2
+    })
 
     return buf
+}
+
+function testConnectivity(hostname, port, callback) {
+    log(`Testing connectivity to ${hostname}:${port}`)
+    
+    const testSocket = dgram.createSocket('udp4')
+    const testMessage = Buffer.from('ping')
+    
+    const timeout = setTimeout(() => {
+        testSocket.close()
+        callback(new Error(`Connectivity test timeout to ${hostname}:${port}`))
+    }, 5000)
+    
+    testSocket.on('error', (err) => {
+        clearTimeout(timeout)
+        testSocket.close()
+        callback(err)
+    })
+    
+    testSocket.send(testMessage, 0, testMessage.length, port, hostname, (err) => {
+        clearTimeout(timeout)
+        testSocket.close()
+        if (err) {
+            log('Connectivity test failed:', err.message)
+            callback(err)
+        } else {
+            log('Connectivity test passed')
+            callback(null)
+        }
+    })
 }
 
 function udpSend(socket, message, rawUrl, callback) {
@@ -89,19 +190,32 @@ function udpSend(socket, message, rawUrl, callback) {
     const hostname = urlMatch[1]
     const port = parseInt(urlMatch[2])
     
-    console.log(`Sending UDP message to ${hostname}:${port}`)
+    log(`Sending ${message.length} bytes to ${hostname}:${port}`)
+    log('Message hex:', message.toString('hex'))
     
-    socket.send(message, 0, message.length, port, hostname, (err) => {
-        if (err) {
-            console.log('UDP send error:', err)
-            callback(err)
-        } else {
-            console.log('UDP message sent successfully')
+    // Test connectivity first
+    testConnectivity(hostname, port, (connectErr) => {
+        if (connectErr) {
+            log('Connectivity test failed, but proceeding anyway:', connectErr.message)
         }
+        
+        socket.send(message, 0, message.length, port, hostname, (err) => {
+            if (err) {
+                log('UDP send error:', err.message)
+                callback(err)
+            } else {
+                log('UDP message sent successfully')
+                // Don't call callback here for success - wait for response
+            }
+        })
     })
 }
 
 function parseAnnounceResp(resp) {
+    if (resp.length < 20) {
+        throw new Error(`Announce response too short: ${resp.length} bytes`)
+    }
+    
     function group(iterable, groupSize) {
         let groups = []
         for(let i = 0; i < iterable.length; i += groupSize) {
@@ -110,105 +224,244 @@ function parseAnnounceResp(resp) {
         return groups
     }
 
-    return {
+    const result = {
         action: resp.readUInt32BE(0),
         transactionId: resp.readUInt32BE(4),
-        leechers: resp.readUInt32BE(8),
-        seeders: resp.readUInt32BE(12),
-        peers: group(resp.slice(20), 6).map(peer => {
-            return {
-                ip: peer.slice(0, 4).join('.'),
-                port: peer.readUInt16BE(4),
-            }
-        })
+        interval: resp.readUInt32BE(8),
+        leechers: resp.readUInt32BE(12),
+        seeders: resp.readUInt32BE(16),
+        peers: []
     }
+    
+    if (resp.length > 20) {
+        const peerData = resp.slice(20)
+        result.peers = group(peerData, 6).map(peer => {
+            if (peer.length === 6) {
+                return {
+                    ip: peer.slice(0, 4).join('.'),
+                    port: peer.readUInt16BE(4),
+                }
+            }
+            return null
+        }).filter(peer => peer !== null)
+    }
+    
+    log('Parsed announce response:', {
+        action: result.action,
+        transactionId: result.transactionId,
+        interval: result.interval,
+        leechers: result.leechers,
+        seeders: result.seeders,
+        peerCount: result.peers.length,
+        peers: result.peers.slice(0, 3) // Show first 3 peers
+    })
+
+    return result
+}
+
+function handleErrorResponse(resp) {
+    if (resp.length >= 8) {
+        const action = resp.readUInt32BE(0)
+        const transactionId = resp.readUInt32BE(4)
+        const errorMessage = resp.slice(8).toString('utf8')
+        
+        log('Tracker error response:', {
+            action,
+            transactionId,
+            error: errorMessage
+        })
+        
+        return new Error(`Tracker error: ${errorMessage}`)
+    }
+    return new Error('Unknown tracker error')
 }
 
 function getPeers(torrent, callback) {
-    const socket = dgram.createSocket('udp4')
-    let connectionId = null
-    let timeout = null
+    // Extract announce URLs
+    let announceUrls = []
     
-    // Set up timeout
-    const TIMEOUT_MS = 15000
-    timeout = setTimeout(() => {
-        console.log('Tracker request timeout')
-        socket.close()
-        callback(new Error('Tracker request timeout'), null)
-    }, TIMEOUT_MS)
-    
-    // Handle socket errors
-    socket.on('error', (err) => {
-        console.log('Socket error:', err)
-        clearTimeout(timeout)
-        socket.close()
-        callback(err, null) 
-    })
-    
-    // Convert URL properly
-    let url
-    if (torrent.announce instanceof Uint8Array) {
-        url = new TextDecoder('utf8').decode(torrent.announce)
-    } else if (Buffer.isBuffer(torrent.announce)) {
-        url = torrent.announce.toString('utf8')
-    } else {
-        url = torrent.announce.toString()
+    if (torrent.announce) {
+        announceUrls.push(torrent.announce)
     }
     
-    console.log('Processed URL:', url)
+    if (torrent['announce-list']) {
+        torrent['announce-list'].forEach(tier => {
+            if (Array.isArray(tier)) {
+                tier.forEach(url => announceUrls.push(url))
+            } else {
+                announceUrls.push(tier)
+            }
+        })
+    }
     
-    // Handle incoming messages
-    socket.on('message', (response, rinfo) => {
-        console.log('Received response from:', rinfo)
-        console.log('Response length:', response.length)
-        console.log('Response type:', respType(response))
+    // Convert URLs and filter for UDP
+    const udpTrackers = announceUrls
+        .map(announce => {
+            if (announce instanceof Uint8Array) {
+                return new TextDecoder('utf8').decode(announce)
+            } else if (Buffer.isBuffer(announce)) {
+                return announce.toString('utf8')
+            } else {
+                return announce.toString()
+            }
+        })
+        .filter(url => url.startsWith('udp://'))
+        .filter((url, index, arr) => arr.indexOf(url) === index) // Remove duplicates
+    
+    log('Available UDP trackers:', udpTrackers)
+    
+    if (udpTrackers.length === 0) {
+        return callback(new Error('No UDP trackers found in torrent'), null)
+    }
+    
+    let trackerIndex = 0
+    
+    function tryNextTracker() {
+        if (trackerIndex >= udpTrackers.length) {
+            return callback(new Error('All trackers failed'), null)
+        }
         
-        try {
-            if (respType(response) === 'connect') {
-                console.log('Received connect response')
-                const connResp = parseConnResp(response)
-                connectionId = connResp.connectionId
-                console.log('Connection ID received, sending announce request')
-                const announceReq = buildAnnounceReq(connectionId, torrent)
-                udpSend(socket, announceReq, url, (err) => {
-                    if (err) {
-                        clearTimeout(timeout)
-                        socket.close()
-                        callback(err, null) // Fix: Pass error as first param
-                    }
-                })
-            } else if (respType(response) === 'announce') {
-                console.log('Received announce response')
+        const currentTracker = udpTrackers[trackerIndex]
+        trackerIndex++
+        
+        log(`Trying tracker ${trackerIndex}/${udpTrackers.length}: ${currentTracker}`)
+        
+        attemptTracker(currentTracker, (err, peers) => {
+            if (err) {
+                log(`Tracker ${trackerIndex} failed:`, err.message)
+                if (trackerIndex < udpTrackers.length) {
+                    setTimeout(tryNextTracker, 2000) // Wait 2 seconds before next tracker
+                } else {
+                    callback(new Error('All trackers failed'), null)
+                }
+            } else {
+                callback(null, peers)
+            }
+        })
+    }
+    
+    function attemptTracker(url, callback) {
+        const socket = dgram.createSocket('udp4')
+        let connectionId = null
+        let timeout = null
+        let retryCount = 0
+        const maxRetries = 3
+        let requestStartTime = Date.now()
+        
+        log(`Attempting tracker: ${url}`)
+        
+        function cleanup() {
+            if (timeout) {
                 clearTimeout(timeout)
-                const announceResp = parseAnnounceResp(response)
+                timeout = null
+            }
+            if (socket) {
+                socket.removeAllListeners()
                 socket.close()
+            }
+        }
+        
+        function startRequest() {
+            requestStartTime = Date.now()
+            
+            // Clear any existing timeout
+            if (timeout) clearTimeout(timeout)
+            
+            // Set timeout with exponential backoff (15s, 30s, 60s)
+            const timeoutMs = 15000 * Math.pow(2, retryCount)
+            log(`Setting timeout to ${timeoutMs}ms (attempt ${retryCount + 1}/${maxRetries + 1})`)
+            
+            timeout = setTimeout(() => {
+                const elapsed = Date.now() - requestStartTime
+                log(`Tracker request timeout after ${elapsed}ms (attempt ${retryCount + 1})`)
                 
-                // Validate peers array
-                if (!announceResp.peers || !Array.isArray(announceResp.peers)) {
-                    callback(new Error('Invalid peers data received'), null)
+                if (retryCount < maxRetries) {
+                    retryCount++
+                    log(`Retrying... (${retryCount}/${maxRetries})`)
+                    setTimeout(startRequest, 2000) // Wait 2 seconds before retry
+                } else {
+                    cleanup()
+                    callback(new Error(`Tracker request timeout after ${maxRetries + 1} attempts`), null)
+                }
+            }, timeoutMs)
+            
+            // Send initial connection request
+            log('Sending connection request...')
+            udpSend(socket, buildConnReq(), url, (err) => {
+                if (err) {
+                    cleanup()
+                    callback(err, null)
+                }
+            })
+        }
+        
+        // Handle socket errors
+        socket.on('error', (err) => {
+            log('Socket error:', err.message)
+            cleanup()
+            callback(err, null)
+        })
+        
+        // Handle incoming messages
+        socket.on('message', (response, rinfo) => {
+            const elapsed = Date.now() - requestStartTime
+            log(`Received ${response.length} bytes from ${rinfo.address}:${rinfo.port} after ${elapsed}ms`)
+            log('Response hex:', response.toString('hex'))
+            
+            try {
+                const type = respType(response)
+                log('Response type:', type)
+                
+                if (type === 'error') {
+                    const error = handleErrorResponse(response)
+                    cleanup()
+                    callback(error, null)
                     return
                 }
                 
-                console.log(`Found ${announceResp.peers.length} peers`)
-                callback(null, announceResp.peers) // Fix: Pass null as error, peers as data
+                if (type === 'connect') {
+                    log('Processing connect response...')
+                    const connResp = parseConnResp(response)
+                    connectionId = connResp.connectionId
+                    log('Connection established, sending announce request...')
+                    const announceReq = buildAnnounceReq(connectionId, torrent)
+                    udpSend(socket, announceReq, url, (err) => {
+                        if (err) {
+                            cleanup()
+                            callback(err, null)
+                        }
+                    })
+                } else if (type === 'announce') {
+                    log('Processing announce response...')
+                    const announceResp = parseAnnounceResp(response)
+                    cleanup()
+                    
+                    if (!announceResp.peers || !Array.isArray(announceResp.peers)) {
+                        callback(new Error('Invalid peers data received'), null)
+                        return
+                    }
+                    
+                    log(`Successfully got ${announceResp.peers.length} peers from tracker`)
+                    callback(null, announceResp.peers)
+                } else {
+                    log('Unknown response type, ignoring')
+                }
+            } catch (err) {
+                log('Error processing response:', err.message)
+                cleanup()
+                callback(err, null)
             }
-        } catch (err) {
-            console.log('Error processing response:', err)
-            clearTimeout(timeout)
-            socket.close()
-            callback(err, null) // Fix: Pass error as first param
-        }
-    })
+        })
+        
+        // Bind socket to random port and start request
+        socket.bind(() => {
+            const address = socket.address()
+            log(`Socket bound to ${address.address}:${address.port}`)
+            startRequest()
+        })
+    }
     
-    // Send initial connection request
-    console.log('Sending initial connection request')
-    udpSend(socket, buildConnReq(), url, (err) => {
-        if (err) {
-            clearTimeout(timeout)
-            socket.close()
-            return callback(err, null) // Fix: Pass error as first param
-        }
-    })
+    tryNextTracker()
 }
 
 export default getPeers
