@@ -2,6 +2,7 @@
   "type": "module",
   "dependencies": {
     "bencode": "^4.0.0",
+    "electron": "^37.2.5",
     "url-parse": "^1.5.10"
   }
 }
