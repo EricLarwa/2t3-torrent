@@ -1,5 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron')
-const path = require('path')
+import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
 let mainWindow
 
@@ -10,9 +14,9 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
-            preload: path.join(__dirname, 'preload.js')
+            preload: join(__dirname, 'preload.cjs') // Note: .cjs extension
         },
-        icon: path.join(__dirname, 'assets/icon.png') 
+        icon: join(__dirname, 'assets/icon.png') // Optional
     })
 
     mainWindow.loadFile('src/gui/index.html')
@@ -61,7 +65,7 @@ ipcMain.handle('select-download-location', async () => {
 // Handle torrent download
 ipcMain.handle('start-download', async (event, torrentPath, downloadPath) => {
     try {
-        // Import your modules
+        // Import your ES modules
         const torrentParser = await import('./src/BitProcess/torrent-parser.js')
         const download = await import('./src/BitProcess/download.js')
         
@@ -74,6 +78,7 @@ ipcMain.handle('start-download', async (event, torrentPath, downloadPath) => {
         
         return { success: true }
     } catch (error) {
+        console.error('Download error:', error)
         return { success: false, error: error.message }
     }
 })

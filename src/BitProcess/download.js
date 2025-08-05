@@ -3,7 +3,7 @@
 import net from 'net'
 import fs from 'fs'
 import { Buffer } from 'buffer'
-import getPeers from '../tracker.js'
+import getPeers from './tracker.js'
 
 import message from './message.js'
 import Pieces from './pieces.js'
