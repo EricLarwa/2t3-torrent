@@ -1,21 +1,23 @@
 'use strict'
 
 import net from 'net'
-import Buffer from 'buffer'
-import getPeers from './tracker'
+import fs from 'fs'
+import { Buffer } from 'buffer'
+import getPeers from './tracker.js'
 
-const message = import('./message.js');
-const Pieces = import('./pieces.js');
-const Queue = import('./Queue.js');
+import message from './message.js'
+import Pieces from './pieces.js'
+import Queue from './Queue.js'
 
-const torrent = () => {
-    getPeers(torrent, peers => {
-        const pieces = new Pieces(torrent)
-        peers.forEach(peer => download(peer, torrent, pieces))
-    })
-}
+export default (torrent, path) => {
+  getPeers(torrent, peers => {
+    const pieces = new Pieces(torrent);
+    const file = fs.openSync(path, 'w');
+    peers.forEach(peer => download(peer, torrent, pieces, file));
+  });
+};
 
-function download(peer, torrent, pieces) {
+function download(peer, torrent, pieces, file) {
     const socket = net.Socket()
 
     socket.on('error', console.log)
@@ -57,7 +59,7 @@ function bitfieldHandler(socket, pieces, queue, payload) {
             byte = Math.floor(byte / 2);
         }
     });
-    
+
     if (queueEmpty) requestPiece(socket, pieces, queue);
 }
 
@@ -92,7 +94,21 @@ function unchokeHandler(socket, pieces, queue) {
     requestPiece(socket, pieces, queue)
 }
 
+function pieceHandler(socket, pieces, queue, torrent, file, pieceResp) {
+    console.log(pieceResp);
+    pieces.addReceived(pieceResp);
 
+    const offset = pieceResp.index * torrent.info['piece length'] + pieceResp.begin;
+    fs.write(file, pieceResp.block, 0, pieceResp.block.length, offset, () => {});
+
+    if (pieces.isDone()) {
+    console.log('DONE!');
+    socket.end();
+    try { fs.closeSync(file); } catch(e) {}
+    } else {
+    requestPiece(socket,pieces, queue);
+    }
+}
 function requestPiece(socket, pieces, queue) {
     if(queue.choked) {
         return null

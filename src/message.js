@@ -1,21 +1,20 @@
 'use strict'
 
-import buffer from 'buffer'
-
-const torrentParser = import('./torrent-parser.js');
+import { Buffer } from 'buffer'
+import torrentParser from './torrent-parser.js'
+import util from './util.js'
 
 const buildHandshake = (torrent) => {
     const buf = Buffer.alloc(68)
 
-    buf.writeUInt8(19, 0) // Protocol length
-    buf.write('BitTorrent protocol', 1) // Protocol name
+    buf.writeUInt8(19, 0)
+    buf.write('BitTorrent protocol', 1)
 
     buf.writeUInt32BE(0, 20)
-    buf.writeUInt32BE(0, 20)
+    buf.writeUInt32BE(0, 24)
     
     torrentParser.infoHash(torrent).copy(buf, 28)
-
-    buffer.write(util.genID())
+    util().copy(buf, 48)
 
     return buf
 }
@@ -114,21 +113,21 @@ const buildPort = (port) => {
 
 const parse = (msg) => {
     const id = msg.length > 4 ? msg.readInt8(4) : null
-    let payload = msg.length > 5 ? msg.slice(50) : null
+    let payload = msg.length > 5 ? msg.slice(5) : null  // Fix: slice from 5, not 50
 
     if(id === 6 || id === 7 || id === 8) {
+        const rest = payload.slice(8)  // Fix: Define rest variable
         payload = {
             index: payload.readInt32BE(0),
             begin: payload.readInt32BE(4)
         }
         payload[id === 7 ? 'block' : 'length'] = rest
-
     }
 
     return {
-        size : msg.readInt32BE(0),
+        size: msg.readInt32BE(0),
         id: id,
-        payload : payload
+        payload: payload
     }
 }
 

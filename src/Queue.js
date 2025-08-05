@@ -1,6 +1,7 @@
 'use strict';
 
-const tp = require('./torrent-parser');
+// Fix: Convert to ES6 imports
+import tp from './torrent-parser.js'
 
 class Queue {
   constructor(torrent) {
@@ -15,7 +16,7 @@ class Queue {
       const pieceBlock = {
         index: pieceIndex,
         begin: i * tp.BLOCK_LEN,
-        length: this.blockLen(this._torrent, pieceIndex, i)
+        length: tp.blockLen(this._torrent, pieceIndex, i)  // Fix: Use tp instead of this.blockLen
       };
       this._queue.push(pieceBlock);
     }
@@ -25,7 +26,7 @@ class Queue {
 
   peek() { return this._queue[0]; }
 
-  length() { return this._queue.length; }
+  length() { return this._queue.length; }  // Fix: Add missing () to make it a method
 }
 
 export default Queue;
